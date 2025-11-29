@@ -12,14 +12,14 @@ terraform {
     }
   }
 
-  Uncomment to enable remote state
-  backend "s3" {
-    bucket         = "leasing-assistant-terraform-state"
-    key            = "dev/lambda/terraform.tfstate"
-    region         = "us-east-1"
-    encrypt        = true
-    dynamodb_table = "terraform-state-lock"
-  }
+  # Uncomment to enable remote state
+  # backend "s3" {
+  #   bucket         = "leasing-assistant-terraform-state"
+  #   key            = "dev/lambda/terraform.tfstate"
+  #   region         = "us-east-1"
+  #   encrypt        = true
+  #   dynamodb_table = "terraform-state-lock"
+  # }
 }
 
 provider "aws" {
@@ -33,4 +33,5 @@ provider "aws" {
     }
   }
 }
+
 
