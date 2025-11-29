@@ -12,4 +12,4 @@
 
 
 fix(sms): correct message body formatting for tenant responses
-chore: remove unused environment variables
+chore: remove unused environment variabless
