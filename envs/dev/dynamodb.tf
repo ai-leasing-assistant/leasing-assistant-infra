@@ -1,13 +1,36 @@
-# DynamoDB Table for Dev Environment
+resource "aws_dynamodb_table" "leasing_app" {
+  name         = "LeasingApp"
+  billing_mode = "PAY_PER_REQUEST"
 
-module "property_table" {
-  source = "../../modules/dynamodb"
+  hash_key  = "PK"
+  range_key = "SK"
 
-  table_name          = "leasing-assistant-properties-dev"
-  partition_key_name  = "landlord_id:property_id"
-  partition_key_type  = "S"
+  attribute {
+    name = "PK"
+    type = "S"
+  }
 
-  # Defaults: PAY_PER_REQUEST billing, SSE enabled, PITR enabled, streams disabled.
+  attribute {
+    name = "SK"
+    type = "S"
+  }
+
+  attribute {
+    name = "GSI1PK"
+    type = "S"
+  }
+
+  attribute {
+    name = "GSI1SK"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name            = "GSI1"
+    hash_key        = "GSI1PK"
+    range_key       = "GSI1SK"
+    projection_type = "ALL"
+  }
 }
 
 
