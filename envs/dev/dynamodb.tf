@@ -55,6 +55,16 @@ resource "aws_dynamodb_table" "TenantSessions" {
     type = "N"
   }
 
+  attribute {
+    name = "propertyId"
+    type = "S"
+  }
+
+  attribute {
+    name = "unitId"
+    type = "S"
+  }
+
   ttl {
     attribute_name = "ttl"
     enabled        = true
