@@ -8,6 +8,7 @@ venv/
 *.tfstate.backup
 *.tfstate.*.backup
 *.tfplan
+*.tfvars
 
 # Lambda deployment packages
 *.zip
