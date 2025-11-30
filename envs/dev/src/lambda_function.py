@@ -10,6 +10,7 @@ from decimal import Decimal
 import boto3
 import urllib.request
 import urllib.error
+import re
 
 # Configure logging
 logger = logging.getLogger()
@@ -38,7 +39,9 @@ def lambda_handler(event, context):
     try:
         # Parse the event
         http_method = event.get('requestContext', {}).get('http', {}).get('method', 'UNKNOWN')
-        path = event.get('rawPath', '/')
+        path_raw = event.get('rawPath', '/')
+        # Normalize multiple slashes (e.g., //property -> /property)
+        path = re.sub(r'/+', '/', path_raw or '/')
         
         # Parse body if present
         body = {}
@@ -55,7 +58,7 @@ def lambda_handler(event, context):
             response = handle_health_check(context, environment, region)
         elif http_method == 'POST' and path == '/assistant':
             response = handle_assistant_request(body, context)
-        elif http_method == 'GET' and path == '/property':
+        elif http_method == 'GET' and (path == '/property' or path.endswith('/property')):
             response = handle_property_request(event, context)
         elif http_method == 'GET' and path == '/properties':
             response = handle_get_properties(context)
@@ -158,8 +161,10 @@ def handle_assistant_request(body, context):
 
 def handle_property_request(event, context):
     """
-    Handle GET /property?id=landlord_id:property_id
-    - Fetch record from DynamoDB using the composite id as partition key
+    Handle GET /property with either:
+      - id=PK:SK
+      - pk=PK&sk=SK
+    - Fetch record from DynamoDB using PK and SK keys
     - Call OpenAI with the record context
     - Return and log the OpenAI response
     """
@@ -172,14 +177,23 @@ def handle_property_request(event, context):
 
     query_params = event.get('queryStringParameters') or {}
     composite_id = query_params.get('id')
-    if not composite_id:
-        return _error_response(400, "Missing required query parameter 'id' formatted as 'landlord_id:property_id'.")
+    pk = query_params.get('pk')
+    sk = query_params.get('sk')
 
-    logger.info(f"Fetching property by id: {composite_id} from table: {table_name}")
-    item = _get_item_from_dynamodb(table_name, {"property_id": composite_id})
+    if composite_id:
+        parts = composite_id.split(':', 1)
+        if len(parts) != 2:
+            return _error_response(400, "Invalid 'id' format. Expected 'PK:SK'.")
+        pk, sk = parts[0], parts[1]
+    elif not (pk and sk):
+        return _error_response(400, "Missing query parameters. Provide either 'id=PK:SK' or both 'pk' and 'sk'.")
+
+    logger.info(f"Fetching item PK={pk}, SK={sk} from table: {table_name}")
+    item = _get_item_from_dynamodb(table_name, {"PK": pk, "SK": sk})
 
     if not item:
-        return _error_response(404, f"No record found for id '{composite_id}'.")
+        ref = composite_id if composite_id else f"{pk}:{sk}"
+        return _error_response(404, f"No record found for id '{ref}'.")
 
     # Prepare prompt from item
     prompt = _build_property_prompt(item)
@@ -202,7 +216,7 @@ def handle_property_request(event, context):
             'Access-Control-Allow-Origin': '*'
         },
         'body': json.dumps({
-            'id': composite_id,
+            'id': composite_id if composite_id else f"{pk}:{sk}",
             'openai_response': ai_response,
             'timestamp': datetime.utcnow().isoformat()
         })
