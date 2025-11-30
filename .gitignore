@@ -1,2 +1,13 @@
 # Virtual environment
 venv/
+
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.backup
+*.tfstate.*.backup
+*.tfplan
+
+# Lambda deployment packages
+*.zip
