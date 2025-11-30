@@ -1,0 +1,17 @@
+{
+    "PK": { "S": "LEAD#+15551234567" },
+    "SK": { "S": "CONTEXT" },
+  
+    "leadPhone": { "S": "+15551234567" },
+    "leadName": { "S": "Jane Smith" },
+  
+    "propertyId": { "S": "456" },
+    "unitId": { "S": "APT1A" },
+  
+    "aiState": { "S": "Lead previously asked about availability and pets. Confirmed cats allowed, dogs not allowed." },
+    "lastMessage": { "S": "Does the unit include water and trash?" },
+  
+    "lastUpdated": { "S": "2025-11-29T21:15:00Z" },
+    "ttl": { "N": "1767268500" } 
+  }
+  
