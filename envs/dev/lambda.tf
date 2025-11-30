@@ -23,6 +23,11 @@ module "leasing_assistant_lambda" {
     ENVIRONMENT = "dev"
     LOG_LEVEL   = "DEBUG"
     REGION      = var.aws_region
+    DDB_TABLE_NAME = module.property_table.table_name
+    # OPENAI_API_KEY should be set securely (e.g., via Secrets Manager/SSM + Lambda env or CI)
+    # OPENAI_MODEL can be overridden; defaults to gpt-4o-mini in code
+    # OPENAI_API_KEY = var.openai_api_key
+    # OPENAI_MODEL   = "gpt-4o-mini"
   }
 
   log_retention_days = 7
