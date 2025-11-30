@@ -1,4 +1,4 @@
-resource "aws_dynamodb_table" "LeasingApp" {
+resource "aws_dynamodb_table" "leasing_app" {
   name         = "LeasingApp"
   billing_mode = "PAY_PER_REQUEST"
 
@@ -33,7 +33,7 @@ resource "aws_dynamodb_table" "LeasingApp" {
   }
 }
 
-resource "aws_dynamodb_table" "TenantSessions" {
+resource "aws_dynamodb_table" "tenant_sessions" {
   name         = "TenantSessions"
   billing_mode = "PAY_PER_REQUEST"
 
@@ -47,21 +47,6 @@ resource "aws_dynamodb_table" "TenantSessions" {
 
   attribute {
     name = "SK"
-    type = "S"
-  }
-
-  attribute {
-    name = "ttl"
-    type = "N"
-  }
-
-  attribute {
-    name = "propertyId"
-    type = "S"
-  }
-
-  attribute {
-    name = "unitId"
     type = "S"
   }
 
