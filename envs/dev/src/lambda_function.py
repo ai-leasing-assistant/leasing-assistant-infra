@@ -220,7 +220,6 @@ def handle_echo_sms(event, context):
         })
     }
 
-
 def handle_property_webhook(event, context):
     """
     Handle Twilio webhook POST to /property.
