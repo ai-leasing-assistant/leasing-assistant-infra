@@ -23,9 +23,8 @@ module "leasing_assistant_lambda" {
     ENVIRONMENT = "dev"
     LOG_LEVEL   = "DEBUG"
     REGION      = var.aws_region
-    DDB_TABLE_NAME = aws_dynamodb_table.leasing_app.name
-    # OPENAI_API_KEY should be set securely (e.g., via Secrets Manager/SSM + Lambda env or CI)
-    # OPENAI_MODEL can be overridden; defaults to gpt-4o-mini in code
+    LEASING_APP_TABLE_NAME = aws_dynamodb_table.leasing_app.name
+    TENANT_SESSIONS_TABLE_NAME = aws_dynamodb_table.tenant_sessions.name
     OPENAI_API_KEY = var.openai_api_key
     OPENAI_MODEL   = "gpt-4o-mini"
   }
