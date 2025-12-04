@@ -21,6 +21,9 @@
   "applicationFee": {
     "N": "45"
   },
+  "smsAppHash": {
+    "S": "#906nassau"
+  },
   "available": {
     "BOOL": true
   },
