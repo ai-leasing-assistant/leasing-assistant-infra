@@ -136,6 +136,22 @@ def _get_item_from_dynamodb(table_name, key):
     # Convert Decimals for safe JSON/use
     return _convert_decimals(item)
 
+def _query_dynamodb_by_gsi1pk(table_name, gsi1pk):
+    """
+    Query DynamoDB table using GSI1 where GSI1PK matches the provided value.
+    Returns a list of items (empty list if none found).
+    """
+    dynamodb = boto3.resource('dynamodb')
+    table = dynamodb.Table(table_name)
+    resp = table.query(
+        IndexName='GSI1',
+        KeyConditionExpression='GSI1PK = :gsi1pk',
+        ExpressionAttributeValues={':gsi1pk': gsi1pk}
+    )
+    items = resp.get('Items', [])
+    # Convert Decimals for safe JSON/use
+    return [_convert_decimals(item) for item in items]
+
 def _parse_pk_sk_from_query(qs, id_key, pk_key, sk_key):
     """
     Returns (pk, sk) from either id=PK:SK or pk=&sk=; returns (None, None) if not provided/invalid.
@@ -197,15 +213,49 @@ def _build_property_prompt(aistate, property_item, body_text):
 def handle_echo_sms(event, context):
     """
     POST /sms
-    Accepts application/x-www-form-urlencoded payload and prints phone and body.
-    Returns JSON echo of phone and body.
+    Accepts application/x-www-form-urlencoded payload.
+    Uses the Body text to search DynamoDB for items matching smsAppHash (via GSI1PK).
+    Calls OpenAI with the property details and returns the AI response.
     """
+    leasing_app = os.environ.get('LEASING_APP_TABLE_NAME', 'LeasingApp')
     form = _parse_form_urlencoded(event)
     from_number = form.get('From') or form.get('from') or ''
     body_text = form.get('Body') or form.get('body') or ''
 
-    print(f"From: {from_number}, Body: {body_text}")
-    logger.info(f"Echo SMS - From: {from_number}, Body: {body_text}")
+    logger.info(f"SMS received - From: {from_number}, Body: {body_text}")
+
+    if not body_text:
+        return _error_response(400, "Missing 'Body' in SMS payload.")
+
+    # Extract the hash from body text (first word or the whole body if it starts with #)
+    # Normalize the body text - ensure it starts with # if it's meant to be a hash
+    search_hash = body_text.strip()
+    if not search_hash.startswith('#'):
+        search_hash = f"#{search_hash}"
+    
+    logger.info(f"Searching for smsAppHash: {search_hash} in table {leasing_app}")
+    matching_items = _query_dynamodb_by_gsi1pk(leasing_app, search_hash)
+    logger.info(f"Found {len(matching_items)} matching items")
+
+    if not matching_items:
+        return _error_response(404, f"No property found for hash: {search_hash}")
+
+    # Use the first matching property item
+    property_item = matching_items[0]
+    logger.info(f"Using property: PK={property_item.get('PK')}, SK={property_item.get('SK')}")
+
+    # Build prompt with property details and body text
+    # For first message, aistate is None (no previous conversation context)
+    aistate = None
+    prompt = _build_property_prompt(aistate, property_item, body_text)
+    
+    # Call OpenAI with the prompt
+    try:
+        ai_response = _call_openai_chat(prompt)
+        logger.info("OpenAI response generated successfully")
+    except Exception as e:
+        logger.error(f"Error calling OpenAI: {str(e)}", exc_info=True)
+        return _error_response(500, f"Error generating AI response: {str(e)}")
 
     return {
         'statusCode': 200,
@@ -216,6 +266,14 @@ def handle_echo_sms(event, context):
         'body': json.dumps({
             'from': from_number,
             'body': body_text,
+            'searchHash': search_hash,
+            'property': {
+                'PK': property_item.get('PK'),
+                'SK': property_item.get('SK'),
+                'propertyId': property_item.get('propertyId'),
+                'unitId': property_item.get('unitId')
+            },
+            'response': ai_response,
             'timestamp': datetime.utcnow().isoformat()
         })
     }
