@@ -5,24 +5,27 @@
   "SK": {
     "S": "UNIT#456#APT1A"
   },
+
+  "smsAppHash": {
+    "S": "#906nassau"
+  },
+
+  "GSI1PK": {
+    "S": "#906nassau"
+  },
+  "GSI1SK": {
+    "S": "LANDLORD#123#UNIT#456#APT1A"
+  },
+
   "amenities": {
     "L": [
-      {
-        "S": "On-site fitness center"
-      },
-      {
-        "S": "Secure entry"
-      },
-      {
-        "S": "Outdoor courtyard"
-      }
+      { "S": "On-site fitness center" },
+      { "S": "Secure entry" },
+      { "S": "Outdoor courtyard" }
     ]
   },
   "applicationFee": {
     "N": "45"
-  },
-  "smsAppHash": {
-    "S": "#906nassau"
   },
   "available": {
     "BOOL": true
