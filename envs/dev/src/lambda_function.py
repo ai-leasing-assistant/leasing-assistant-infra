@@ -152,6 +152,26 @@ def _query_dynamodb_by_gsi1pk(table_name, gsi1pk):
     # Convert Decimals for safe JSON/use
     return [_convert_decimals(item) for item in items]
 
+def _update_item_in_dynamodb(table_name, key, update_expression, expression_attribute_values):
+    """
+    Update an item in DynamoDB using update expression.
+    """
+    dynamodb = boto3.resource('dynamodb')
+    table = dynamodb.Table(table_name)
+    table.update_item(
+        Key=key,
+        UpdateExpression=update_expression,
+        ExpressionAttributeValues=expression_attribute_values
+    )
+
+def _put_item_in_dynamodb(table_name, item):
+    """
+    Put (create or replace) an item in DynamoDB.
+    """
+    dynamodb = boto3.resource('dynamodb')
+    table = dynamodb.Table(table_name)
+    table.put_item(Item=item)
+
 def _parse_pk_sk_from_query(qs, id_key, pk_key, sk_key):
     """
     Returns (pk, sk) from either id=PK:SK or pk=&sk=; returns (None, None) if not provided/invalid.
@@ -216,7 +236,9 @@ def handle_echo_sms(event, context):
     Accepts application/x-www-form-urlencoded payload.
     Uses the Body text to search DynamoDB for items matching smsAppHash (via GSI1PK).
     Calls OpenAI with the property details and returns the AI response.
+    Manages tenant session state in DynamoDB.
     """
+    sessions_table = os.environ.get('TENANT_SESSIONS_TABLE_NAME', 'TenantSessions')
     leasing_app = os.environ.get('LEASING_APP_TABLE_NAME', 'LeasingApp')
     form = _parse_form_urlencoded(event)
     from_number = form.get('From') or form.get('from') or ''
@@ -224,6 +246,9 @@ def handle_echo_sms(event, context):
 
     logger.info(f"SMS received - From: {from_number}, Body: {body_text}")
 
+    if not from_number:
+        return _error_response(400, "Missing 'From' in SMS payload.")
+    
     if not body_text:
         return _error_response(400, "Missing 'Body' in SMS payload.")
 
@@ -244,9 +269,22 @@ def handle_echo_sms(event, context):
     property_item = matching_items[0]
     logger.info(f"Using property: PK={property_item.get('PK')}, SK={property_item.get('SK')}")
 
+    # Extract property details
+    landlord_id = property_item.get('PK')  # e.g., "LANDLORD#123"
+    property_id = property_item.get('propertyId')
+    unit_id = property_item.get('unitId')
+
+    # Check if session exists for this phone number
+    pk = f"LEAD#{from_number}"
+    sk = "CONTEXT"
+    logger.info(f"Checking if session exists for number {from_number} in table {sessions_table} (PK={pk}, SK={sk})")
+    
+    session_item = _get_item_from_dynamodb(sessions_table, {"PK": pk, "SK": sk})
+    
+    # Get existing aiState if session exists, otherwise None for first message
+    aistate = session_item.get('aiState') if session_item else None
+    
     # Build prompt with property details and body text
-    # For first message, aistate is None (no previous conversation context)
-    aistate = None
     prompt = _build_property_prompt(aistate, property_item, body_text)
     
     # Call OpenAI with the prompt
@@ -256,6 +294,36 @@ def handle_echo_sms(event, context):
     except Exception as e:
         logger.error(f"Error calling OpenAI: {str(e)}", exc_info=True)
         return _error_response(500, f"Error generating AI response: {str(e)}")
+
+    # Update or create session with new aiState
+    if session_item:
+        # Update existing session
+        logger.info(f"Updating existing session for {from_number}")
+        _update_item_in_dynamodb(
+            sessions_table,
+            {"PK": pk, "SK": sk},
+            "SET aiState = :aistate, lastMessage = :lastMessage, lastUpdated = :lastUpdated",
+            {
+                ':aistate': ai_response,
+                ':lastMessage': body_text,
+                ':lastUpdated': datetime.utcnow().isoformat()
+            }
+        )
+    else:
+        # Create new session
+        logger.info(f"Creating new session for {from_number}")
+        new_session = {
+            'PK': pk,
+            'SK': sk,
+            'aiState': ai_response,
+            'landlordId': landlord_id,
+            'propertyId': property_id,
+            'unitId': unit_id,
+            'leadPhone': from_number,
+            'lastMessage': body_text,
+            'lastUpdated': datetime.utcnow().isoformat()
+        }
+        _put_item_in_dynamodb(sessions_table, new_session)
 
     return {
         'statusCode': 200,

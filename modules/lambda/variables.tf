@@ -92,6 +92,12 @@ variable "function_url_cors" {
   default = null
 }
 
+variable "dynamodb_tables" {
+  description = "Map of DynamoDB table names to their ARNs for IAM permissions"
+  type        = map(string)
+  default     = {}
+}
+
 variable "tags" {
   description = "Tags to apply to all resources"
   type        = map(string)

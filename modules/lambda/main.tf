@@ -30,10 +30,23 @@ resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-# Attach DynamoDB access policy
-resource "aws_iam_role_policy_attachment" "lambda_dynamodb_access" {
-  role       = aws_iam_role.lambda_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonDynamoDBReadOnlyAccess"
+# Attach DynamoDB access policy for specific tables
+resource "aws_iam_role_policy" "lambda_dynamodb_access" {
+  name   = "${var.function_name}-dynamodb-access"
+  role   = aws_iam_role.lambda_role.name
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "dynamodb:*"
+        Resource = concat(
+          [for arn in var.dynamodb_tables : arn],
+          [for arn in var.dynamodb_tables : "${arn}/index/*"]
+        )
+      }
+    ]
+  })
 }
 
 # Optional: Attach VPC execution policy if Lambda is in VPC
@@ -98,7 +111,7 @@ resource "aws_lambda_function" "function" {
   depends_on = [
     aws_cloudwatch_log_group.lambda_log_group,
     aws_iam_role_policy_attachment.lambda_basic_execution,
-    aws_iam_role_policy_attachment.lambda_dynamodb_access
+    aws_iam_role_policy.lambda_dynamodb_access
   ]
 }
 

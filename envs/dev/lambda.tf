@@ -29,6 +29,12 @@ module "leasing_assistant_lambda" {
     OPENAI_MODEL   = "gpt-4o-mini"
   }
 
+  # DynamoDB table ARNs for IAM permissions
+  dynamodb_tables = {
+    leasing_app     = aws_dynamodb_table.leasing_app.arn
+    tenant_sessions = aws_dynamodb_table.tenant_sessions.arn
+  }
+
   log_retention_days = 7
 
   # Enable Function URL for easy testing in dev
