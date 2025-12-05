@@ -56,8 +56,6 @@ def lambda_handler(event, context):
         # Route the request
         if http_method == 'GET' and path == '/':
             response = handle_health_check(context, environment, region)
-        elif http_method == 'POST' and (path == '/property' or path.endswith('/property')):
-            response = handle_property_webhook(event, context)
         elif http_method == 'POST' and (path == '/sms' or path.endswith('/sms')):
             response = handle_echo_sms(event, context)
         else:
@@ -345,67 +343,6 @@ def handle_echo_sms(event, context):
             'timestamp': datetime.utcnow().isoformat()
         })
     }
-
-def handle_property_webhook(event, context):
-    """
-    Handle Twilio webhook POST to /property.
-    - Content-Type: application/x-www-form-urlencoded
-    - Must check if there is a session for the incoming number.
-    Convention:
-      - Session item keyed by PK='LEAD#+<From>', SK='CONTEXT' (adjust if your schema differs).
-    Response: JSON indicating whether a session exists and basic echo of inbound fields.
-    """
-    sessions_table = os.environ.get('TENANT_SESSIONS_TABLE_NAME', 'TenantSessions')
-    leasing_app = os.environ.get('LEASING_APP_TABLE_NAME', 'LeasingApp')
-    form = _parse_form_urlencoded(event)
-
-    from_number = form.get('From') or form.get('from') or ''
-    to_number = form.get('To') or form.get('to') or ''
-    body_text = form.get('Body') or form.get('body') or ''
-    message_sid = form.get('MessageSid') or form.get('messagesid') or ''
-
-    if not from_number:
-        return _error_response(400, "Missing 'From' in webhook body.")
-
-    # Session schema per your example:
-    #   PK = "LEAD#+<phone>"
-    #   SK = "CONTEXT"
-    pk = f"LEAD#{from_number}"
-    sk = "CONTEXT"
-    logger.info(f"Checking if session exists for number {from_number} in table {sessions_table} (PK={pk}, SK={sk})")
-
-    session_item = _get_item_from_dynamodb(sessions_table, {"PK": pk, "SK": sk})
-    exists = session_item is not None
-
-    if exists:
-        # get aiState from session item
-        aistate = session_item.get('aiState')
-
-        # get landlordId and propertyId#unitId from session item
-        landlordId = session_item.get('landlordId')
-        propertyId = session_item.get('propertyId')
-        unitId = session_item.get('unitId')
-
-        # get property details from leasing app table in json format using landlordId and propertyId#unitId
-        property_item = _get_item_from_dynamodb(leasing_app, {"PK": landlordId, "SK": f"UNIT#{propertyId}#{unitId}"})
-        property_json = json.dumps(property_item)
-
-        # call openai chat with aistate, property details, and body_text
-        prompt = _build_property_prompt(aistate, property_json, body_text)
-        response = _call_openai_chat(prompt)
-        # update session item with new aiState
-        session_item['aiState'] = response
-        #_update_item_in_dynamodb(sessions_table, session_item)
-        return {
-            'statusCode': 200,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
-            },
-            'body': json.dumps({'response': response})
-        }
-    else:   
-        return _error_response(404, "No session found for number {from_number}")
 
 def _parse_form_urlencoded(event):
     """
