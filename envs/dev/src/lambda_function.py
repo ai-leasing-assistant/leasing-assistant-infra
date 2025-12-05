@@ -199,34 +199,54 @@ def _convert_decimals(obj):
     return obj
 
 
-def _build_property_prompt(aistate, property_item, body_text):
+def _build_property_messages(aistate, property_item, body_text):
     """
-    Create a prompt combining aiState, property details, and body text.
+    Create a messages array for OpenAI chat API combining aiState (previous conversation),
+    property details, and current user message (body_text).
+    
+    Returns:
+        list: Array of message dicts with 'role' and 'content' keys
     """
     prop_json = json.dumps(property_item)  # already decimal-converted
-    header = (
-        "You are a friendly, professional AI Leasing Assistant that represents the landlord and helps prospective tenants learn about a rental property."
-        ""
-        "Your goals are:"
-        "1. Answer questions naturally using the property details provided."
-        "2. Maintain continuity using the session context without repeating it back verbatim."
-        "3. Ask smart follow-up questions when information is missing or unclear."
-        "4. Qualify the lead politely (income, move-in date, pets, occupancy count, credit issues, etc.)."
-        "5. Move the conversation forward in a warm, conversational tone."
-        "6. Guide the lead toward scheduling an in-person or virtual tour when they seem like a good match."
-        "7. Keep responses clear, concise, positive, and human-like."
-        ""
-        "Guidelines:"
-        "- Never invent details not found in the property data."
-        "- If the lead asks for unavailable information, say you will confirm with the landlord."
-        "- If the lead seems unqualified based on the requirements, respond politely but firmly."
-        "- Always try to keep the conversation flowing with one helpful follow-up question or next step."
-        "- When appropriate, offer specific showing time options instead of asking open-ended questions."
-        ""
-        "You must always prioritize helping the lead progress toward a showing if they appear interested."
+    system_content = (
+        "You are a friendly, professional AI Leasing Assistant that represents the landlord "
+        "and helps prospective tenants learn about a rental property.\n\n"
+        "Your goals are:\n"
+        "1. Answer questions naturally using the property details provided.\n"
+        "2. Maintain continuity using the session context without repeating it back verbatim.\n"
+        "3. Ask smart follow-up questions when information is missing or unclear.\n"
+        "4. Qualify the lead politely (income, move-in date, pets, occupancy count, credit issues, etc.).\n"
+        "5. Move the conversation forward in a warm, conversational tone.\n"
+        "6. Guide the lead toward scheduling an in-person or virtual tour when they seem like a good match.\n"
+        "7. Keep responses clear, concise, positive, and human-like.\n\n"
+        "Guidelines:\n"
+        "- Never invent details not found in the property data.\n"
+        "- If the lead asks for unavailable information, say you will confirm with the landlord.\n"
+        "- If the lead seems unqualified based on the requirements, respond politely but firmly.\n"
+        "- Always try to keep the conversation flowing with one helpful follow-up question or next step.\n"
+        "- When appropriate, offer specific showing time options instead of asking open-ended questions.\n\n"
+        "You must always prioritize helping the lead progress toward a showing if they appear interested.\n\n"
+        f"Property JSON:\n{prop_json}"
     )
-    parts = [header, "Property JSON:\n", prop_json]
-    return "".join(parts)
+    
+    messages = [
+        {"role": "system", "content": system_content}
+    ]
+    
+    # If there's previous conversation state (aistate), add it as assistant's previous response
+    if aistate:
+        messages.append({
+            "role": "assistant",
+            "content": aistate
+        })
+    
+    # Add the current user message
+    messages.append({
+        "role": "user",
+        "content": body_text
+    })
+    
+    return messages
 
 def handle_echo_sms(event, context):
     """
@@ -250,61 +270,74 @@ def handle_echo_sms(event, context):
     if not body_text:
         return _error_response(400, "Missing 'Body' in SMS payload.")
 
-    # Extract the hash from body text (first word or the whole body if it starts with #)
-    # Normalize the body text - ensure it starts with # if it's meant to be a hash
-    search_hash = body_text.strip()
-    if not search_hash.startswith('#'):
-        search_hash = f"#{search_hash}"
-    
-    logger.info(f"Searching for smsAppHash: {search_hash} in table {leasing_app}")
-    matching_items = _query_dynamodb_by_gsi1pk(leasing_app, search_hash)
-    logger.info(f"Found {len(matching_items)} matching items")
-
-    if not matching_items:
-        return _error_response(404, f"No property found for hash: {search_hash}")
-
-    # Use the first matching property item
-    property_item = matching_items[0]
-    logger.info(f"Using property: PK={property_item.get('PK')}, SK={property_item.get('SK')}")
-
-    # Extract property details
-    landlord_id = property_item.get('PK')  # e.g., "LANDLORD#123"
-    property_id = property_item.get('propertyId')
-    unit_id = property_item.get('unitId')
-
-    # Check if session exists for this phone number
+    # Check if there is an active session for this phone number
     pk = f"LEAD#{from_number}"
     sk = "CONTEXT"
     logger.info(f"Checking if session exists for number {from_number} in table {sessions_table} (PK={pk}, SK={sk})")
     
     session_item = _get_item_from_dynamodb(sessions_table, {"PK": pk, "SK": sk})
     
+    # Determine smsAppHash: use from session if exists, otherwise extract from body text
+    if session_item and session_item.get('smsAppHash'):
+        # Active session exists - use smsAppHash from session
+        sms_app_hash = session_item.get('smsAppHash')
+        logger.info(f"Using smsAppHash from active session: {sms_app_hash}")
+    else:
+        # No active session - extract hash from body text
+        if body_text.strip().startswith('#'):
+            sms_app_hash = body_text.strip()
+            # Normalize to ensure it starts with #
+            if not sms_app_hash.startswith('#'):
+                sms_app_hash = f"#{sms_app_hash}"
+            logger.info(f"Extracting smsAppHash from body text: {sms_app_hash}")
+        else:
+            return _error_response(404, "No active session found and no hash provided in message. Please start with a property hash (e.g., #906nassau).")
+
+    # Query the property item from the leasing app table using GSI1
+    logger.info(f"Querying property with smsAppHash: {sms_app_hash} in table {leasing_app}")
+    matching_items = _query_dynamodb_by_gsi1pk(leasing_app, sms_app_hash)
+    
+    if not matching_items:
+        return _error_response(404, f"No property found for hash: {sms_app_hash}")
+
+    # Use the first matching property item
+    property_item = matching_items[0]
+    logger.info(f"Found property: PK={property_item.get('PK')}, SK={property_item.get('SK')}")
+
+    # Extract property details
+    landlord_id = property_item.get('PK')  # e.g., "LANDLORD#123"
+    property_id = property_item.get('propertyId')
+    unit_id = property_item.get('unitId')
+    # Ensure we use the smsAppHash from the property item (in case it differs slightly)
+    property_sms_app_hash = property_item.get('smsAppHash', sms_app_hash)
+    
     # Get existing aiState if session exists, otherwise None for first message
     aistate = session_item.get('aiState') if session_item else None
     
-    # Build prompt with property details and body text
-    prompt = _build_property_prompt(aistate, property_item, body_text)
+    # Build messages array with property details, previous conversation (aistate), and current user message
+    messages = _build_property_messages(aistate, property_item, body_text)
     
-    # Call OpenAI with the prompt
+    # Call OpenAI with the messages
     try:
-        ai_response = _call_openai_chat(prompt)
+        ai_response = _call_openai_chat(messages)
         logger.info("OpenAI response generated successfully")
     except Exception as e:
         logger.error(f"Error calling OpenAI: {str(e)}", exc_info=True)
         return _error_response(500, f"Error generating AI response: {str(e)}")
 
-    # Update or create session with new aiState
+    # Update or create session with new aiState and smsAppHash
     if session_item:
         # Update existing session
         logger.info(f"Updating existing session for {from_number}")
         _update_item_in_dynamodb(
             sessions_table,
             {"PK": pk, "SK": sk},
-            "SET aiState = :aistate, lastMessage = :lastMessage, lastUpdated = :lastUpdated",
+            "SET aiState = :aistate, lastMessage = :lastMessage, lastUpdated = :lastUpdated, smsAppHash = :smsAppHash",
             {
                 ':aistate': ai_response,
                 ':lastMessage': body_text,
-                ':lastUpdated': datetime.utcnow().isoformat()
+                ':lastUpdated': datetime.utcnow().isoformat(),
+                ':smsAppHash': property_sms_app_hash
             }
         )
     else:
@@ -319,7 +352,8 @@ def handle_echo_sms(event, context):
             'unitId': unit_id,
             'leadPhone': from_number,
             'lastMessage': body_text,
-            'lastUpdated': datetime.utcnow().isoformat()
+            'lastUpdated': datetime.utcnow().isoformat(),
+            'smsAppHash': property_sms_app_hash
         }
         _put_item_in_dynamodb(sessions_table, new_session)
 
@@ -332,7 +366,7 @@ def handle_echo_sms(event, context):
         'body': json.dumps({
             'from': from_number,
             'body': body_text,
-            'searchHash': search_hash,
+            'searchHash': property_sms_app_hash,
             'property': {
                 'PK': property_item.get('PK'),
                 'SK': property_item.get('SK'),
@@ -370,10 +404,17 @@ def _parse_form_urlencoded(event):
     return flat
 
 
-def _call_openai_chat(prompt):
+def _call_openai_chat(messages):
     """
     Calls OpenAI Chat Completions API using standard library (urllib) to avoid external deps.
     Requires OPENAI_API_KEY env variable. Optional OPENAI_MODEL (default gpt-4o-mini).
+    
+    Args:
+        messages: List of message dicts with 'role' and 'content' keys (e.g., 
+                  [{"role": "system", "content": "..."}, {"role": "user", "content": "..."}])
+    
+    Returns:
+        str: The assistant's response content
     """
     api_key = os.environ.get('OPENAI_API_KEY')
     if not api_key:
@@ -383,10 +424,7 @@ def _call_openai_chat(prompt):
     url = "https://api.openai.com/v1/chat/completions"
     payload = {
         "model": model,
-        "messages": [
-            {"role": "system", "content": "You are a leasing assistant for rental properties."},
-            {"role": "user", "content": prompt}
-        ],
+        "messages": messages,
         "temperature": 0.3
     }
     data = json.dumps(payload).encode("utf-8")
